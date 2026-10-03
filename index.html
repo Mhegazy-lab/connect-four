@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<meta name="application-name" content="Connect Four" />
+<meta name="description" content="Drop discs, connect four to win." />
+<link rel="icon" type="image/png" href="icon-192.png" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<title>Connect Four</title>
+<style>
+  :root{--acc:#FACC15; --bg:#100c02; --ink:#fffbe8; --muted:#8a7a4a; --ai:#38BDF8;}
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%; overflow:hidden}
+  body{
+    background:radial-gradient(120% 90% at 50% 0%, #241a06 0%, var(--bg) 65%);
+    color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex; align-items:center; justify-content:center; min-height:100dvh;
+    -webkit-font-smoothing:antialiased; -webkit-user-select:none; user-select:none;
+  }
+  .app{width:min(480px,100vw - 24px); height:100dvh; max-height:780px; display:flex; flex-direction:column; padding:16px 14px 12px}
+  header{flex:0 0 auto; text-align:center}
+  h1{font-size:19px; letter-spacing:.16em; color:var(--acc); text-shadow:0 0 18px rgba(250,204,21,.6)}
+  .tally{display:flex; justify-content:center; gap:10px; margin-top:8px}
+  .pill{font-size:12px; font-weight:800; letter-spacing:.12em; border:1px solid rgba(250,204,21,.35); border-radius:999px; padding:5px 12px; background:rgba(250,204,21,.07)}
+  .pill b{font-size:15px}
+  .py b{color:var(--acc)} .pa b{color:var(--ai)} .pd b{color:var(--muted)}
+  #status{flex:0 0 auto; text-align:center; font-size:15px; font-weight:800; letter-spacing:.2em; margin:8px 0; min-height:22px; color:var(--acc)}
+  #cols{flex:0 0 auto; display:grid; grid-template-columns:repeat(7,1fr); gap:6px; margin-bottom:6px}
+  .colbtn{
+    border:2px solid rgba(250,204,21,.4); border-radius:12px; background:rgba(250,204,21,.06);
+    color:var(--acc); font-size:22px; font-weight:900; padding:8px 0; cursor:pointer;
+  }
+  .colbtn:disabled{opacity:.25}
+  #grid{flex:1 1 auto; min-height:0; display:grid; grid-template-columns:repeat(7,1fr); grid-template-rows:repeat(6,1fr); gap:6px; padding:10px; border:2px solid rgba(250,204,21,.3); border-radius:18px; background:rgba(250,204,21,.03); margin-bottom:10px}
+  .slot{border-radius:50%; background:#1a1408; border:1px solid rgba(250,204,21,.18)}
+  .slot.y{background:radial-gradient(circle at 35% 30%, #fef08a, #FACC15 60%, #a16207); box-shadow:0 0 12px rgba(250,204,21,.7)}
+  .slot.a{background:radial-gradient(circle at 35% 30%, #bae6fd, #38BDF8 60%, #0369a1); box-shadow:0 0 12px rgba(56,189,248,.7)}
+  .slot.win{outline:3px solid #fff; outline-offset:-1px}
+  .hidden{display:none !important}
+  .btn{
+    flex:0 0 auto; width:100%; border:none; border-radius:18px; padding:20px;
+    font-size:20px; font-weight:900; letter-spacing:.16em; cursor:pointer;
+    background:linear-gradient(160deg,#FACC15,#a16207); color:#1c1202;
+    box-shadow:0 0 26px rgba(250,204,21,.45);
+  }
+  .btn:active{transform:scale(.97)}
+  button:focus-visible{outline:3px solid var(--acc); outline-offset:2px}
+</style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <h1>◉ CONNECT FOUR ◉</h1>
+      <div class="tally">
+        <div class="pill py">YOU <b id="ty">0</b></div>
+        <div class="pill pa">CPU <b id="ta">0</b></div>
+        <div class="pill pd">DRAW <b id="td">0</b></div>
+      </div>
+    </header>
+    <div id="status">YOUR MOVE</div>
+    <div id="cols"></div>
+    <div id="grid"></div>
+    <button id="againBtn" class="btn hidden" data-focusable>↻ PLAY AGAIN</button>
+  </main>
+<script>
+(function(){
+'use strict';
+var ROWS=6, COLS=7;
+function $(id){return document.getElementById(id);}
+/* ---------- audio ---------- */
+var AC=null;
+function beep(freq,ms){
+  try{
+    AC=AC||new (window.AudioContext||window.webkitAudioContext)();
+    var o=AC.createOscillator(), g=AC.createGain();
+    o.type='sine'; o.frequency.value=freq;
+    g.gain.setValueAtTime(0.0001,AC.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.4,AC.currentTime+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001,AC.currentTime+(ms/1000));
+    o.connect(g); g.connect(AC.destination);
+    o.start(); o.stop(AC.currentTime+(ms/1000)+0.02);
+  }catch(e){}
+}
+/* ---------- storage ---------- */
+function loadT(){try{var s=JSON.parse(localStorage.getItem('connect-four-v1'));return s||{you:0,ai:0,draw:0};}catch(e){return{you:0,ai:0,draw:0};}}
+function saveT(t){try{localStorage.setItem('connect-four-v1',JSON.stringify(t));}catch(e){}}
+var tally=loadT();
+/* ---------- pure logic (test hooks) ---------- */
+function emptyBoard(){var b=[],r,c;for(r=0;r<ROWS;r++){b.push([]);for(c=0;c<COLS;c++)b[r].push('');}return b;}
+function dropRow(b,col){for(var r=ROWS-1;r>=0;r--)if(!b[r][col])return r; return -1;}
+function checkWin(b,p){
+  var r,c,dr,dc,k,ok;
+  var dirs=[[0,1],[1,0],[1,1],[1,-1]];
+  for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+    if(b[r][c]!==p)continue;
+    for(var d=0;d<4;d++){dr=dirs[d][0];dc=dirs[d][1];ok=true;
+      for(k=1;k<4;k++){var nr=r+dr*k,nc=c+dc*k;
+        if(nr<0||nr>=ROWS||nc<0||nc>=COLS||b[nr][nc]!==p){ok=false;break;}}
+      if(ok)return true;}
+  }
+  return false;
+}
+function boardFull(b){for(var c=0;c<COLS;c++)if(dropRow(b,c)>=0)return false; return true;}
+function winningCol(b,p){
+  for(var c=0;c<COLS;c++){var r=dropRow(b,c); if(r<0)continue;
+    b[r][c]=p; var w=checkWin(b,p); b[r][c]=''; if(w)return c;}
+  return -1;
+}
+function aiMove(b){
+  var m=winningCol(b,'A'); if(m>=0)return m;   // take immediate win
+  m=winningCol(b,'Y'); if(m>=0)return m;        // block immediate win
+  var order=[3,2,4,1,5,0,6];                    // prefer center
+  for(var i=0;i<order.length;i++)if(dropRow(b,order[i])>=0)return order[i];
+  return -1;
+}
+if(typeof window!=='undefined'){window.__logic={emptyBoard:emptyBoard,dropRow:dropRow,checkWin:checkWin,boardFull:boardFull,aiMove:aiMove};}
+/* ---------- ui ---------- */
+var board, slots=[], colBtns=[], state='idle', aiTimer=null, winCells=[];
+function buildUI(){
+  var cg=$('cols');
+  for(var c=0;c<COLS;c++){
+    var b=document.createElement('button');
+    b.className='colbtn'; b.textContent='▼'; b.setAttribute('data-focusable','');
+    b.setAttribute('aria-label','Drop in column '+(c+1));
+    (function(cc,btn){btn.addEventListener('click',function(){playerDrop(cc);});})(c,b);
+    cg.appendChild(b); colBtns.push(b);
+  }
+  var g=$('grid');
+  for(var r=0;r<ROWS;r++){slots.push([]);
+    for(var cc=0;cc<COLS;cc++){
+      var s=document.createElement('div'); s.className='slot';
+      g.appendChild(s); slots[r].push(s);
+    }}
+}
+function render(){
+  for(var r=0;r<ROWS;r++)for(var c=0;c<COLS;c++){
+    var s=slots[r][c];
+    s.classList.toggle('y',board[r][c]==='Y');
+    s.classList.toggle('a',board[r][c]==='A');
+    s.classList.toggle('win',winCells.indexOf(r*COLS+c)>=0);
+  }
+  $('ty').textContent=tally.you; $('ta').textContent=tally.ai; $('td').textContent=tally.draw;
+  for(var cc=0;cc<COLS;cc++)colBtns[cc].disabled=(state!=='play'||dropRow(board,cc)<0);
+}
+function setStatus(t){$('status').textContent=t;}
+function newGame(){
+  if(aiTimer){clearTimeout(aiTimer); aiTimer=null;}
+  board=emptyBoard(); winCells=[]; state='play';
+  $('againBtn').classList.add('hidden');
+  setStatus('YOUR MOVE'); render(); colBtns[3].focus();
+}
+function playerDrop(c){
+  if(state!=='play')return;
+  var r=dropRow(board,c); if(r<0)return;
+  board[r][c]='Y'; beep(520,110); render();
+  if(checkWin(board,'Y')){endGame('Y');return;}
+  if(boardFull(board)){endGame('draw');return;}
+  state='ai'; setStatus('CPU THINKING…'); render();
+  aiTimer=setTimeout(aiTurn,600);
+}
+function aiTurn(){
+  aiTimer=null; if(state!=='ai')return;
+  var c=aiMove(board);
+  if(c>=0){var r=dropRow(board,c); board[r][c]='A'; beep(300,130);}
+  render();
+  if(checkWin(board,'A')){endGame('A');return;}
+  if(boardFull(board)){endGame('draw');return;}
+  state='play'; setStatus('YOUR MOVE'); render();
+  colBtns[Math.max(0,Math.min(6,c))].focus();
+}
+function endGame(res){
+  state='over';
+  if(res==='Y'){tally.you++; setStatus('◉ YOU WIN!'); beep(660,180); setTimeout(function(){beep(880,240);},160);}
+  else if(res==='A'){tally.ai++; setStatus('CPU WINS'); beep(220,300);}
+  else{tally.draw++; setStatus('— DRAW —'); beep(440,200);}
+  saveT(tally);
+  if(res==='Y'||res==='A'){
+    var p=res, r, c, dr, dc, k, ok;
+    var dirs=[[0,1],[1,0],[1,1],[1,-1]];
+    outer:
+    for(r=0;r<ROWS;r++)for(c=0;c<COLS;c++){
+      if(board[r][c]!==p)continue;
+      for(var d=0;d<4;d++){dr=dirs[d][0];dc=dirs[d][1];ok=true;
+        for(k=1;k<4;k++){var nr=r+dr*k,nc=c+dc*k;
+          if(nr<0||nr>=ROWS||nc<0||nc>=COLS||board[nr][nc]!==p){ok=false;break;}}
+        if(ok){for(k=0;k<4;k++)winCells.push((r+dr*k)*COLS+(c+dc*k)); break outer;}
+      }
+    }
+  }
+  render();
+  var ab=$('againBtn'); ab.classList.remove('hidden'); ab.focus();
+}
+/* ---------- keyboard ---------- */
+function moveColFocus(k){
+  var cur=0;
+  for(var i=0;i<COLS;i++)if(colBtns[i]===document.activeElement){cur=i;break;}
+  if(k==='ArrowLeft')cur=(cur+COLS-1)%COLS;
+  if(k==='ArrowRight')cur=(cur+1)%COLS;
+  colBtns[cur].focus();
+}
+function menuNav(k){
+  var f=Array.prototype.slice.call(document.querySelectorAll('[data-focusable]'))
+    .filter(function(el){return el.offsetParent!==null&&!el.disabled;});
+  if(!f.length)return;
+  var i=f.indexOf(document.activeElement);
+  var d=(k==='ArrowRight'||k==='ArrowDown')?1:-1;
+  f[(i+d+f.length)%f.length].focus();
+}
+document.addEventListener('keydown',function(e){
+  var k=e.key;
+  if(k==='ArrowUp'||k==='ArrowDown'||k==='ArrowLeft'||k==='ArrowRight'||k===' '){e.preventDefault();}
+  if(state==='play'&&(k==='ArrowLeft'||k==='ArrowRight')){moveColFocus(k);return;}
+  var ae=document.activeElement;
+  if((k==='Enter'||k===' ')&&ae&&ae.tagName==='BUTTON'){e.preventDefault(); ae.click();return;}
+  if(k.indexOf('Arrow')===0){menuNav(k);}
+});
+/* ---------- init ---------- */
+buildUI(); newGame();
+$('againBtn').addEventListener('click',newGame);
+})();
+</script>
+</body>
+</html>
